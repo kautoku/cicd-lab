@@ -1,7 +1,7 @@
 import { buildApp } from './app';
 
 const app = buildApp({ logger: true });
-const port = Number(process.env.PORT || 3000);
+const port: string = Number(process.env.PORT || 3000);  // ← 故意：number 不能 assign to string
 const host = process.env.HOST || '0.0.0.0';
 
 async function start() {
