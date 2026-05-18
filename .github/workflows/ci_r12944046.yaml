@@ -1,0 +1,81 @@
+name: ci_r12944046
+
+# 觸發條件：所有分支的 push 都會自動跑這條 pipeline，
+# 並且 pull_request 也會跑一次，方便 reviewer 看結果。
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+  # 允許將測試結果寫回 Checks 頁面（dorny/test-reporter 需要）
+  checks: write
+  pull-requests: write
+
+# 同一個 ref 重複 push 時，取消前一個未完成的 run，節省 minutes
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-test:
+    name: Lint, Typecheck, Format & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      # ---------- 品質檢查 ----------
+      # 任何一個步驟失敗，整個 job 都會被標記為 failure。
+      # 沒有設 continue-on-error（預設 false），所以 typecheck 壞掉 prettier 就不會再跑，
+      # 直接讓整條 pipeline 標紅。
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Prettier format check
+        run: npm run format:check
+
+      # ---------- 測試與報告 ----------
+      # vitest 透過 --reporter=junit 額外輸出 JUnit XML，
+      # 之後用 dorny/test-reporter 把這份 XML 變成 GitHub Checks 上的測試報告。
+      # if: always() 確保即使測試失敗仍會 publish + 上傳 artifact。
+
+      - name: Run tests (with JUnit reporter)
+        run: |
+          mkdir -p reports
+          npm test -- \
+            --reporter=default \
+            --reporter=junit \
+            --outputFile.junit=reports/vitest-junit.xml
+
+      - name: Publish test report to Checks tab
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Vitest Results
+          path: reports/vitest-junit.xml
+          reporter: jest-junit
+          fail-on-error: 'true'
+
+      - name: Upload test report as artifact
+        # 備援方案：就算 dorny/test-reporter 因為權限或 fork 限制不能寫 Checks，
+        # 這個 artifact 仍然可以從 Actions 頁面下載。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-junit-report
+          path: reports/
+          if-no-files-found: error
